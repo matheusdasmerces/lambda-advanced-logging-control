@@ -1,12 +1,13 @@
-import * as cdk from 'aws-cdk-lib';
+import { Stack, StackProps, RemovalPolicy, Aws } from 'aws-cdk-lib';
+import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 import { ApplicationLogLevel, SystemLogLevel, LoggingFormat } from 'aws-cdk-lib/aws-lambda';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
 import { LogGroup, LogGroupClass, RetentionDays } from 'aws-cdk-lib/aws-logs';
 import { CfnDocument } from 'aws-cdk-lib/aws-ssm';
 import { Construct } from 'constructs';
 
-export class LambdaAdvancedLoggingControlStack extends cdk.Stack {
-  constructor(scope: Construct, id: string, props?: cdk.StackProps) {
+export class LambdaAdvancedLoggingControlStack extends Stack {
+  constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
     new NodejsFunction(this, 'AdvancedLoggingControlFunction', {
@@ -21,11 +22,25 @@ export class LambdaAdvancedLoggingControlStack extends cdk.Stack {
       logGroup: new LogGroup(this, 'MyLogGroup', {
         logGroupName: '/aws/lambda/advanced-logging-control',
         retention: RetentionDays.ONE_DAY,
-        removalPolicy: cdk.RemovalPolicy.DESTROY,
+        removalPolicy: RemovalPolicy.DESTROY,
         //set log group class to INFREQUENT_ACCESS, which is cheaper than the default STANDARD
         logGroupClass: LogGroupClass.INFREQUENT_ACCESS,
       }),
     });
+
+    const automationIamRole = new Role(this, 'AutomationIamRole', {
+      assumedBy: new ServicePrincipal('ssm.amazonaws.com'),
+    });
+
+    automationIamRole.addToPolicy(
+      new PolicyStatement({
+        actions: [
+          'lambda:GetFunctionConfiguration',
+          'lambda:UpdateFunctionConfiguration',
+        ],
+        resources: [`arn:aws:lambda:${Aws.REGION}:${Aws.ACCOUNT_ID}:function:*`],
+      })
+    );
 
     new CfnDocument(this, 'ModifyLambdaLogLevelDocument', {
       documentType: "Automation",
@@ -35,6 +50,7 @@ export class LambdaAdvancedLoggingControlStack extends cdk.Stack {
       content: {
         schemaVersion: "0.3",
         description: "Modify the log level of a Lambda function temporarily. After 10 minutes, the log level will be reset to the original value.",
+        assumeRole: automationIamRole.roleArn,
         parameters: {
           FunctionName: {
             type: "String",
